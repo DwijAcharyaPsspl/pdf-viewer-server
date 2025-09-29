@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
+
 """
 PDF Viewer Server for Spectacles
 Python-based server - No build tool issues!
-
 Installation:
-    pip install flask flask-cors flask-socketio pymupdf pillow
+pip install flask flask-cors flask-socketio pymupdf pillow
 
 Usage:
-    python server.py
+python server.py
 """
 
 from flask import Flask, jsonify, send_file
@@ -76,13 +76,12 @@ class PDFProcessor:
             
             pdf_cache[pdf_path] = pdf_info
             logger.info(f"PDF loaded: {pdf_path} ({doc.page_count} pages)")
-            
             return pdf_info
             
         except Exception as e:
             logger.error(f"Error loading PDF: {e}")
             raise
-    
+
     @staticmethod
     def render_page(doc, page_num, quality='high', dpi=150):
         """Render a specific page to image"""
@@ -121,7 +120,7 @@ class PDFProcessor:
         except Exception as e:
             logger.error(f"Error rendering page {page_num}: {e}")
             raise
-    
+
     @staticmethod
     def save_page_image(image_data, session_id, page_num):
         """Save rendered page to temp directory and return URL"""
@@ -177,7 +176,6 @@ def list_pdfs():
             'pdfs': pdf_files,
             'count': len(pdf_files)
         })
-        
     except Exception as e:
         return jsonify({
             'success': False,
@@ -189,7 +187,6 @@ def get_pdf_info(pdf_id):
     """Get PDF metadata and page count"""
     try:
         pdf_path = str(PDF_DIR / f"{pdf_id}.pdf")
-        
         if not os.path.exists(pdf_path):
             return jsonify({
                 'success': False,
@@ -204,12 +201,44 @@ def get_pdf_info(pdf_id):
             'total_pages': pdf_info['total_pages'],
             'metadata': pdf_info['metadata']
         })
-        
     except Exception as e:
         return jsonify({
             'success': False,
             'error': str(e)
         }), 500
+
+# NEW: Add native PDF serving endpoints
+@app.route('/api/pdf/<pdf_id>/raw')
+def serve_raw_pdf(pdf_id):
+    """Serve the raw PDF file directly"""
+    try:
+        pdf_path = PDF_DIR / f"{pdf_id}.pdf"
+        if not pdf_path.exists():
+            return jsonify({'error': 'PDF not found'}), 404
+        
+        return send_file(pdf_path, mimetype='application/pdf', 
+                        as_attachment=False)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/pdf/<pdf_id>/base64')
+def serve_pdf_base64(pdf_id):
+    """Serve PDF as base64 for WebView embedding"""
+    try:
+        pdf_path = PDF_DIR / f"{pdf_id}.pdf"
+        if not pdf_path.exists():
+            return jsonify({'error': 'PDF not found'}), 404
+            
+        with open(pdf_path, 'rb') as f:
+            pdf_data = base64.b64encode(f.read()).decode('utf-8')
+            
+        return jsonify({
+            'success': True,
+            'pdfData': f"data:application/pdf;base64,{pdf_data}",
+            'filename': f"{pdf_id}.pdf"
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/pages/<session_id>/<filename>')
 def serve_page_image(session_id, filename):
@@ -239,7 +268,6 @@ def handle_connect():
     }
     
     logger.info(f"Client connected: {session_id}")
-    
     emit('connected', {
         'session_id': session_id,
         'message': 'Connected to PDF viewer server'
@@ -267,8 +295,7 @@ def handle_load_pdf(data):
         # Load PDF
         pdf_info = pdf_processor.load_pdf(pdf_path)
         
-        # Store in session (Note: We can't store the document object in sessions)
-        # We'll reload it when needed
+        # Store in session
         session_data = next((s for s in sessions.values() if s.get('sid')), None)
         if session_data:
             session_data['current_pdf'] = pdf_path
@@ -408,7 +435,6 @@ def cleanup_old_sessions():
                     import shutil
                     shutil.rmtree(session_dir)
                     logger.info(f"Cleaned up session: {session_id}")
-                
                 del sessions[session_id]
     except Exception as e:
         logger.error(f"Cleanup error: {e}")
@@ -420,11 +446,11 @@ def cleanup_old_sessions():
 if __name__ == '__main__':
     print("""
 ╔════════════════════════════════════════╗
-║  PDF Viewer Server for Spectacles      ║
-║  Python + Flask + PyMuPDF              ║
-║  Running on port 5000                  ║
+║      PDF Viewer Server for Spectacles  ║
+║        Python + Flask + PyMuPDF       ║
+║         Running on port 5000           ║
 ╚════════════════════════════════════════╝
-    """)
+""")
     print("WebSocket: ws://localhost:5000")
     print("REST API: http://localhost:5000/api/pdfs")
     print(f"PDF Directory: {PDF_DIR.absolute()}\n")
@@ -440,7 +466,5 @@ if __name__ == '__main__':
     cleanup_thread.start()
     
     # Start server
-if __name__ == '__main__':
-    import os
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
